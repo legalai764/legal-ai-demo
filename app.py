@@ -39,10 +39,8 @@ if uploaded_file is not None:
 
     if question and text:
         with st.spinner("Analyzing..."):
-            # Placeholder LLM logic
-            response = f"🔍 Based on your question: '{question}', here's what we found in the document:
-
-(Sample AI response would go here)"
+            # Corrected f-string syntax
+            response = f"🔍 Based on your question: '{question}', here's what we found in the document:\n\n(Sample AI response would go here)"
             st.success(response)
 else:
     st.info("Please upload a PDF file to begin.")
