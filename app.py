@@ -1,50 +1,92 @@
 
 import streamlit as st
-import PyPDF2
-from io import StringIO
-import base64
+import fitz  # PyMuPDF
+from openai import OpenAI
+import os
+import re
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="Legal.AI - Property Document Analyzer",
-    page_icon="📜",
-    layout="wide",
-    initial_sidebar_state="expanded"
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Page configuration
+st.set_page_config(page_title="Legal.AI - Decode Indian Property Documents", layout="wide")
+st.markdown(
+    '''
+    <style>
+    body { background-color: #0e1117; color: white; }
+    .stApp { background-color: #0e1117; }
+    .title { font-size: 2.5em; font-weight: bold; }
+    .subtitle { font-size: 1.5em; }
+    </style>
+    ''',
+    unsafe_allow_html=True
 )
 
-# --- Sidebar ---
-st.sidebar.image("https://via.placeholder.com/150x50?text=Legal.AI", use_column_width=True)
-st.sidebar.title("Navigation")
-st.sidebar.markdown("Upload a property document (PDF) and ask legal questions about it.")
-
-# --- Main Content ---
-st.title("📄 Legal.AI - Property Document Analyzer")
-st.markdown("Upload a **property-related PDF** (sale deed, patta, etc.) and get targeted legal insights.")
-
-uploaded_file = st.file_uploader("Upload your property PDF file", type=["pdf"])
-
-if uploaded_file is not None:
-    # Read PDF file content
-    pdf_reader = PyPDF2.PdfReader(uploaded_file)
-    text = ""
-    for page in pdf_reader.pages:
-        text += page.extract_text() or ""
-
-    # Display extracted content (expandable)
-    with st.expander("📑 View Extracted Document Text"):
-        st.write(text)
-
-    # User question
-    question = st.text_input("Ask a question about this document:", placeholder="e.g., Are there any encumbrances mentioned?")
-
-    if question and text:
-        with st.spinner("Analyzing..."):
-            # Corrected f-string syntax
-            response = f"🔍 Based on your question: '{question}', here's what we found in the document:\n\n(Sample AI response would go here)"
-            st.success(response)
-else:
-    st.info("Please upload a PDF file to begin.")
-
-# --- Footer ---
+# --- Logo and Title ---
+st.image("https://via.placeholder.com/160x60?text=Legal.AI", width=160)
+st.markdown("<div class='title'>Decode Indian Property Documents with AI</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Upload property PDFs and get instant legal insights, clause tagging, and summaries.</div>", unsafe_allow_html=True)
 st.markdown("---")
-st.caption("© 2025 Legal.AI — An AI assistant for real estate due diligence in India.")
+
+# --- Upload Section ---
+uploaded_file = st.file_uploader("📄 Upload your property document (PDF only)", type=["pdf"])
+document_text = ""
+
+if uploaded_file:
+    with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+        for page in doc:
+            document_text += page.get_text()
+    st.success("✅ Document parsed successfully!")
+
+    st.markdown("### 🧠 Auto-Extracted Key Clauses:")
+    clauses = {
+        "Owner": re.findall(r"(?:owner(?:\s*is)?|in favour of)\s*([A-Z][a-zA-Z\s]+)", document_text, re.IGNORECASE),
+        "Property Location": re.findall(r"located at\s+([^\n,.]+)", document_text, re.IGNORECASE),
+        "Survey Number": re.findall(r"Survey No[:.]?\s*([\w\d/-]+)", document_text, re.IGNORECASE),
+        "Sale Consideration": re.findall(r"Rs\.?\s?([\d,]+)", document_text)
+    }
+    for key, value in clauses.items():
+        if value:
+            st.markdown(f"**{key}:** {value[0]}")
+        else:
+            st.markdown(f"**{key}:** Not found")
+
+    st.markdown("---")
+
+    # --- Question Answering ---
+    question = st.text_input("💬 Ask a legal question about this document")
+    if question:
+        with st.spinner("Thinking..."):
+            full_prompt = f"The following is a property document in India:\n\n{document_text[:3000]}\n\nQuestion: {question}"
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are a legal expert specialized in Indian property law."},
+                        {"role": "user", "content": full_prompt}
+                    ]
+                )
+                reply = response.choices[0].message.content
+                st.markdown("### 🔍 Answer:")
+                st.markdown(reply)
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
+
+    st.markdown("---")
+
+    # --- Summary ---
+    if st.button("📑 Generate Legal Summary"):
+        with st.spinner("Summarizing..."):
+            try:
+                summary_prompt = f"Summarize this Indian property document for a legal layperson:\n\n{document_text[:3000]}"
+                summary_response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "Summarize Indian legal documents simply."},
+                        {"role": "user", "content": summary_prompt}
+                    ]
+                )
+                st.markdown("### 📄 Document Summary:")
+                st.markdown(summary_response.choices[0].message.content)
+            except Exception as e:
+                st.error(f"Error generating summary: {str(e)}")
